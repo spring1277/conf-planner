@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0ea5e9" />
+  <title>해외학회 & 가족여행 플래너</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">✈️</span>
+      <div>
+        <h1>해외학회 &amp; 가족여행 플래너</h1>
+        <p class="sub">진단검사의학 · 일정 · 관심도 · 준비 · 여행</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button id="btnSync" class="ghost" title="학회 데이터 새로고침">↻ 데이터</button>
+      <button id="btnExport" class="ghost" title="내 데이터 백업">⬇ 백업</button>
+      <button id="btnImport" class="ghost" title="백업 불러오기">⬆ 복원</button>
+      <input type="file" id="importFile" accept="application/json" hidden />
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="list">📋 학회</button>
+    <button class="tab" data-tab="plan">🧳 방문 준비</button>
+    <button class="tab" data-tab="travel">👨‍👩‍👧‍👦 가족여행</button>
+    <button class="tab" data-tab="cal">🗓 타임라인</button>
+  </nav>
+
+  <main id="app">
+    <!-- 학회 리스트 -->
+    <section id="tab-list" class="tabpane active">
+      <div class="filters">
+        <input type="search" id="q" placeholder="학회명·도시·국가 검색" />
+        <select id="fField"><option value="">전체 분야</option></select>
+        <select id="fYear"><option value="">전체 연도</option></select>
+        <select id="fStatus">
+          <option value="upcoming">예정만</option>
+          <option value="">전체(종료 포함)</option>
+          <option value="interested">관심(★1+)</option>
+        </select>
+        <select id="sort">
+          <option value="date">날짜순</option>
+          <option value="interest">관심도순</option>
+        </select>
+      </div>
+      <div id="listWrap" class="cards"></div>
+    </section>
+
+    <!-- 방문 준비 -->
+    <section id="tab-plan" class="tabpane">
+      <p class="hint">참석하기로 정한 학회(방문 예정 ✔)마다 준비 체크리스트와 메모, 예산을 관리합니다.</p>
+      <div id="planWrap" class="cards"></div>
+    </section>
+
+    <!-- 가족여행 -->
+    <section id="tab-travel" class="tabpane">
+      <p class="hint">학회에 붙일 가족여행을 계획합니다. 동행 가족, 여행 일정, 할 일, 예산을 학회별로 관리합니다.</p>
+      <div class="family-setup">
+        <label>동행 가족(쉼표로 구분)</label>
+        <input type="text" id="familyMembers" placeholder="예: 아빠, 엄마, 첫째, 둘째, 셋째" />
+      </div>
+      <div id="travelWrap" class="cards"></div>
+    </section>
+
+    <!-- 타임라인 -->
+    <section id="tab-cal" class="tabpane">
+      <p class="hint">다가오는 마감(초록·등록)과 학회 일정을 시간순으로 봅니다.</p>
+      <div id="calWrap" class="timeline"></div>
+    </section>
+  </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <button class="modal-close" id="modalClose">✕</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
