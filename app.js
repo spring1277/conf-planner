@@ -72,8 +72,39 @@ async function init() {
   DATA.fields.forEach(f => FIELD_MAP[f.key] = f);
   buildFilters();
   document.getElementById('familyMembers').value = store.family || '';
+  initTheme();
   bindEvents();
   renderAll();
+}
+
+/* ---------- 테마(라이트/다크) ---------- */
+const THEME_KEY = 'confplanner.theme';
+function resolvedTheme() {
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t === 'light' || t === 'dark') return t;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function updateThemeBtn() {
+  const btn = document.getElementById('btnTheme');
+  if (!btn) return;
+  const cur = resolvedTheme();
+  btn.textContent = cur === 'dark' ? '☀️' : '🌙';
+  btn.title = cur === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환';
+}
+function initTheme() {
+  updateThemeBtn();
+  // 사용자가 명시적으로 고르지 않았을 땐 시스템 설정 변화를 따라 아이콘만 갱신
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    let saved = null;
+    try { saved = localStorage.getItem(THEME_KEY); } catch (e) { /* ignore */ }
+    if (saved !== 'light' && saved !== 'dark') updateThemeBtn();
+  });
+}
+function toggleTheme() {
+  const next = resolvedTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* ignore */ }
+  updateThemeBtn();
 }
 
 function buildFilters() {
@@ -81,6 +112,16 @@ function buildFilters() {
   DATA.fields.forEach(f => {
     const o = document.createElement('option'); o.value = f.key; o.textContent = f.label; ff.appendChild(o);
   });
+  const fc = document.getElementById('fCountry');
+  const counts = {};
+  DATA.conferences.forEach(c => { counts[c.country] = (counts[c.country] || 0) + 1; });
+  const countries = [...new Set(DATA.conferences.map(c => c.country))]
+    .sort((a, b) => a.localeCompare(b, 'ko'));
+  countries.forEach(ct => {
+    const o = document.createElement('option'); o.value = ct;
+    o.textContent = `${ct} (${counts[ct]})`; fc.appendChild(o);
+  });
+
   const years = [...new Set(DATA.conferences.map(c => c.year))].sort();
   const fy = document.getElementById('fYear');
   years.forEach(y => { const o = document.createElement('option'); o.value = y; o.textContent = y + '년'; fy.appendChild(o); });
@@ -95,11 +136,12 @@ function bindEvents() {
     document.getElementById('tab-' + t.dataset.tab).classList.add('active');
     renderAll();
   });
-  ['q', 'fField', 'fYear', 'fStatus', 'sort'].forEach(id =>
+  ['q', 'fField', 'fCountry', 'fYear', 'fStatus', 'sort'].forEach(id =>
     document.getElementById(id).addEventListener('input', renderList));
   document.getElementById('familyMembers').addEventListener('input', e => {
     store.family = e.target.value; save();
   });
+  document.getElementById('btnTheme').addEventListener('click', toggleTheme);
   document.getElementById('btnSync').addEventListener('click', async () => {
     try {
       const res = await fetch('data/conferences.json?' + Date.now(), { cache: 'no-store' });
@@ -120,12 +162,14 @@ function renderAll() { renderList(); renderPlan(); renderTravel(); renderTimelin
 function renderList() {
   const q = document.getElementById('q').value.trim().toLowerCase();
   const ff = document.getElementById('fField').value;
+  const fc = document.getElementById('fCountry').value;
   const fy = document.getElementById('fYear').value;
   const fs = document.getElementById('fStatus').value;
   const sort = document.getElementById('sort').value;
 
   let list = DATA.conferences.filter(c => {
     if (ff && c.field !== ff) return false;
+    if (fc && c.country !== fc) return false;
     if (fy && String(c.year) !== fy) return false;
     if (q) {
       const hay = (c.name + ' ' + c.abbr + ' ' + c.city + ' ' + c.country).toLowerCase();
@@ -140,6 +184,10 @@ function renderList() {
   list.sort((a, b) => {
     if (sort === 'interest') {
       const d = cs(b.id).interest - cs(a.id).interest;
+      if (d !== 0) return d;
+    }
+    if (sort === 'country') {
+      const d = a.country.localeCompare(b.country, 'ko');
       if (d !== 0) return d;
     }
     return (a.start || '').localeCompare(b.start || '');

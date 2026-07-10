@@ -3,10 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0ea5e9" />
+  <meta name="theme-color" content="#f4f6f6" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#10161b" media="(prefers-color-scheme: dark)" />
   <title>해외학회 & 가족여행 플래너</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css" />
+  <script>try { var t = localStorage.getItem('confplanner.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <header class="topbar">
@@ -14,10 +16,11 @@
       <span class="logo">✈️</span>
       <div>
         <h1>해외학회 &amp; 가족여행 플래너</h1>
-        <p class="sub">진단검사의학 · 일정 · 관심도 · 준비 · 여행</p>
+        <p class="sub">진단검사 · 종양 · 혈액 · 병리 · 가족여행</p>
       </div>
     </div>
     <div class="topbar-actions">
+      <button id="btnTheme" class="ghost icon-btn" title="테마 전환" aria-label="라이트/다크 테마 전환">🌙</button>
       <button id="btnSync" class="ghost" title="학회 데이터 새로고침">↻ 데이터</button>
       <button id="btnExport" class="ghost" title="내 데이터 백업">⬇ 백업</button>
       <button id="btnImport" class="ghost" title="백업 불러오기">⬆ 복원</button>
@@ -38,6 +41,7 @@
       <div class="filters">
         <input type="search" id="q" placeholder="학회명·도시·국가 검색" />
         <select id="fField"><option value="">전체 분야</option></select>
+        <select id="fCountry"><option value="">전체 국가</option></select>
         <select id="fYear"><option value="">전체 연도</option></select>
         <select id="fStatus">
           <option value="upcoming">예정만</option>
@@ -47,6 +51,7 @@
         <select id="sort">
           <option value="date">날짜순</option>
           <option value="interest">관심도순</option>
+          <option value="country">국가순</option>
         </select>
       </div>
       <div id="listWrap" class="cards"></div>
@@ -84,6 +89,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
