@@ -8,7 +8,7 @@
   <title>해외학회 & 가족여행 플래너</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <script>try { var t = localStorage.getItem('confplanner.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="styles.css?v=6" />
 </head>
 <body>
   <header class="topbar">
@@ -54,6 +54,7 @@
           <option value="country">국가순</option>
         </select>
       </div>
+      <button id="btnAddConf" class="add-conf-btn">➕ 목록에 없는 학회 직접 추가</button>
       <div id="listWrap" class="cards"></div>
     </section>
 
@@ -89,6 +90,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

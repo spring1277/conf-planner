@@ -14,10 +14,12 @@ let store = load();
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) { const s = JSON.parse(raw); if (!Array.isArray(s.custom)) s.custom = []; return s; }
   } catch (e) { /* ignore */ }
-  return { conf: {}, family: '', savedAt: null };
+  return { conf: {}, family: '', savedAt: null, custom: [] };
 }
+// 시드 학회(conferences.json) + 사용자가 직접 추가한 학회
+function allConfs() { return DATA.conferences.concat(store.custom || []); }
 function save() {
   store.savedAt = new Date().toISOString();
   localStorage.setItem(LS_KEY, JSON.stringify(store));
@@ -107,24 +109,34 @@ function toggleTheme() {
   updateThemeBtn();
 }
 
+// 필터 드롭다운을 (재)구성 — 직접 추가로 국가·연도가 늘면 다시 호출. 선택값은 유지.
 function buildFilters() {
+  const list = allConfs();
+
   const ff = document.getElementById('fField');
+  const ffPrev = ff.value; ff.length = 1;
   DATA.fields.forEach(f => {
     const o = document.createElement('option'); o.value = f.key; o.textContent = f.label; ff.appendChild(o);
   });
-  const fc = document.getElementById('fCountry');
-  const counts = {};
-  DATA.conferences.forEach(c => { counts[c.country] = (counts[c.country] || 0) + 1; });
-  const countries = [...new Set(DATA.conferences.map(c => c.country))]
-    .sort((a, b) => a.localeCompare(b, 'ko'));
-  countries.forEach(ct => {
-    const o = document.createElement('option'); o.value = ct;
-    o.textContent = `${ct} (${counts[ct]})`; fc.appendChild(o);
-  });
+  ff.value = ffPrev;
 
-  const years = [...new Set(DATA.conferences.map(c => c.year))].sort();
+  const fc = document.getElementById('fCountry');
+  const fcPrev = fc.value; fc.length = 1;
+  const counts = {};
+  list.forEach(c => { counts[c.country] = (counts[c.country] || 0) + 1; });
+  [...new Set(list.map(c => c.country))]
+    .sort((a, b) => a.localeCompare(b, 'ko'))
+    .forEach(ct => {
+      const o = document.createElement('option'); o.value = ct;
+      o.textContent = `${ct} (${counts[ct]})`; fc.appendChild(o);
+    });
+  fc.value = fcPrev;
+
   const fy = document.getElementById('fYear');
-  years.forEach(y => { const o = document.createElement('option'); o.value = y; o.textContent = y + '년'; fy.appendChild(o); });
+  const fyPrev = fy.value; fy.length = 1;
+  [...new Set(list.map(c => c.year))].sort()
+    .forEach(y => { const o = document.createElement('option'); o.value = y; o.textContent = y + '년'; fy.appendChild(o); });
+  fy.value = fyPrev;
 }
 
 function bindEvents() {
@@ -142,11 +154,12 @@ function bindEvents() {
     store.family = e.target.value; save();
   });
   document.getElementById('btnTheme').addEventListener('click', toggleTheme);
+  document.getElementById('btnAddConf').addEventListener('click', () => openConfModal());
   document.getElementById('btnSync').addEventListener('click', async () => {
     try {
       const res = await fetch('data/conferences.json?' + Date.now(), { cache: 'no-store' });
       DATA = await res.json(); FIELD_MAP = {}; DATA.fields.forEach(f => FIELD_MAP[f.key] = f);
-      renderAll(); toast('학회 데이터를 새로고침했습니다');
+      buildFilters(); renderAll(); toast('학회 데이터를 새로고침했습니다');
     } catch (e) { toast('새로고침 실패'); }
   });
   document.getElementById('btnExport').addEventListener('click', exportData);
@@ -167,7 +180,7 @@ function renderList() {
   const fs = document.getElementById('fStatus').value;
   const sort = document.getElementById('sort').value;
 
-  let list = DATA.conferences.filter(c => {
+  let list = allConfs().filter(c => {
     if (ff && c.field !== ff) return false;
     if (fc && c.country !== fc) return false;
     if (fy && String(c.year) !== fy) return false;
@@ -219,6 +232,7 @@ function cardHTML(c) {
       <span class="field-badge" style="background:${f.color}">${f.label}</span>
       <span class="status-badge status-${st}">${statusText(st)}</span>
       ${!c.official ? '<span class="est-badge">추정/미확정</span>' : ''}
+      ${c.custom ? '<span class="custom-badge">직접추가</span>' : ''}
       <span class="spacer"></span>
       <span class="dday ${ddCls}">${dd}</span>
     </div>
@@ -231,8 +245,9 @@ function cardHTML(c) {
     <div class="card-actions">
       <div class="stars" title="관심도">${stars}</div>
       <span class="spacer"></span>
+      ${c.custom ? '<button class="mini edit-conf">수정</button>' : ''}
       <button class="mini attend ${s.attending ? 'on' : ''}">${s.attending ? '✔ 방문 예정' : '방문 예정'}</button>
-      <a class="mini link" href="${c.url}" target="_blank" rel="noopener">🔗</a>
+      ${c.url ? `<a class="mini link" href="${c.url}" target="_blank" rel="noopener">🔗</a>` : ''}
     </div>
   </div>`;
 }
@@ -247,6 +262,8 @@ function bindCard(card) {
       save(); renderList();
     });
   });
+  const editBtn = card.querySelector('.edit-conf');
+  if (editBtn) editBtn.addEventListener('click', () => openConfModal(id));
   card.querySelector('.attend').addEventListener('click', () => {
     const cur = cs(id);
     cur.attending = !cur.attending;
@@ -260,7 +277,7 @@ function bindCard(card) {
 
 /* ---------- 방문 준비 ---------- */
 function attendingConfs() {
-  return DATA.conferences
+  return allConfs()
     .filter(c => cs(c.id).attending)
     .sort((a, b) => (a.start || '').localeCompare(b.start || ''));
 }
@@ -383,7 +400,7 @@ function bindTravelCard(id) {
     s.travel.enabled = !s.travel.enabled;
     // 여행 기간 기본값: 학회 종료 다음날부터
     if (s.travel.enabled && !s.travel.from) {
-      const c = DATA.conferences.find(x => x.id === id);
+      const c = allConfs().find(x => x.id === id);
       if (c) { s.travel.from = c.start; s.travel.to = c.end; }
     }
     save(); renderTravel();
@@ -399,7 +416,7 @@ function bindTravelCard(id) {
 function renderTimeline() {
   const wrap = document.getElementById('calWrap');
   const events = [];
-  DATA.conferences.forEach(c => {
+  allConfs().forEach(c => {
     if (confStatus(c) === 'done') return;
     events.push({ date: c.start, type: 'event', label: `${c.abbr} 개막`, sub: `${c.city}, ${c.country}` });
     if (c.abstractDeadline && daysUntil(c.abstractDeadline) >= 0)
@@ -419,6 +436,77 @@ function renderTimeline() {
     </div>`).join('');
 }
 
+/* ---------- 학회 직접 추가/수정/삭제 ---------- */
+const REGIONS = ['아시아', '유럽', '북미', '남미', '오세아니아', '아프리카', '중동', '기타'];
+function openConfModal(editId) {
+  const c = editId ? (store.custom || []).find(x => x.id === editId) : null;
+  const fieldOpts = DATA.fields.map(f =>
+    `<option value="${f.key}" ${c && c.field === f.key ? 'selected' : ''}>${f.label}</option>`).join('');
+  const regionOpts = REGIONS.map(r =>
+    `<option value="${r}" ${c && c.region === r ? 'selected' : ''}>${r}</option>`).join('');
+  document.getElementById('modalBody').innerHTML = `
+    <h2>${c ? '학회 수정' : '학회 직접 추가'}</h2>
+    <label class="small">학회명 *</label>
+    <input class="field-input" id="cfName" value="${esc(c && c.name)}" placeholder="예: Asian Society of Clinical Pathology and Laboratory Medicine">
+    <label class="small">약칭</label>
+    <input class="field-input" id="cfAbbr" value="${esc(c && c.abbr)}" placeholder="예: ASCPaLM 2026">
+    <label class="small">분야</label>
+    <select class="field-input" id="cfField">${fieldOpts}</select>
+    <div class="cf-row">
+      <div><label class="small">도시</label><input class="field-input" id="cfCity" value="${esc(c && c.city)}" placeholder="예: Taipei"></div>
+      <div><label class="small">국가 *</label><input class="field-input" id="cfCountry" value="${esc(c && c.country)}" placeholder="예: 대만"></div>
+    </div>
+    <label class="small">지역</label>
+    <select class="field-input" id="cfRegion">${regionOpts}</select>
+    <div class="cf-row">
+      <div><label class="small">시작일 *</label><input type="date" class="field-input" id="cfStart" value="${esc(c && c.start)}"></div>
+      <div><label class="small">종료일</label><input type="date" class="field-input" id="cfEnd" value="${esc(c && c.end)}"></div>
+    </div>
+    <div class="cf-row">
+      <div><label class="small">초록 마감</label><input type="date" class="field-input" id="cfAbs" value="${esc(c && c.abstractDeadline)}"></div>
+      <div><label class="small">얼리버드 마감</label><input type="date" class="field-input" id="cfEarly" value="${esc(c && c.earlyDeadline)}"></div>
+    </div>
+    <label class="small">공식 URL</label>
+    <input class="field-input" id="cfUrl" value="${esc(c && c.url)}" placeholder="https://...">
+    <label class="small">메모</label>
+    <textarea class="field-textarea" id="cfNote" placeholder="장소·세부 일정·비고">${esc(c && c.note)}</textarea>
+    <button class="btn-primary" id="cfSave">${c ? '수정 저장' : '추가'}</button>
+    ${c ? '<button class="btn-danger" id="cfDelete">이 학회 삭제</button>' : ''}
+  `;
+  document.getElementById('modal').classList.remove('hidden');
+  document.getElementById('cfSave').addEventListener('click', () => saveConf(editId));
+  const del = document.getElementById('cfDelete');
+  if (del) del.addEventListener('click', () => deleteConf(editId));
+}
+
+function saveConf(editId) {
+  const val = id => document.getElementById(id).value.trim();
+  const name = val('cfName'), country = val('cfCountry'), start = val('cfStart');
+  if (!name || !country || !start) { toast('학회명·국가·시작일은 필수입니다'); return; }
+  const obj = {
+    id: editId || ('custom-' + Date.now().toString(36)),
+    name, abbr: val('cfAbbr') || name, field: val('cfField'),
+    city: val('cfCity'), country, region: val('cfRegion'),
+    start, end: val('cfEnd') || start, year: +start.slice(0, 4),
+    abstractDeadline: val('cfAbs') || null,
+    earlyDeadline: val('cfEarly') || null,
+    url: val('cfUrl'), note: val('cfNote'),
+    official: true, custom: true
+  };
+  if (!Array.isArray(store.custom)) store.custom = [];
+  const idx = store.custom.findIndex(x => x.id === obj.id);
+  if (idx >= 0) store.custom[idx] = obj; else store.custom.push(obj);
+  save(); buildFilters(); renderAll(); closeModal();
+  toast(editId ? '학회를 수정했습니다' : '학회를 추가했습니다');
+}
+
+function deleteConf(id) {
+  store.custom = (store.custom || []).filter(x => x.id !== id);
+  delete store.conf[id];
+  save(); buildFilters(); renderAll(); closeModal();
+  toast('학회를 삭제했습니다');
+}
+
 /* ---------- 백업/복원 ---------- */
 function exportData() {
   const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
@@ -435,6 +523,7 @@ function importData(e) {
     try {
       const obj = JSON.parse(reader.result);
       if (!obj.conf) throw new Error('형식 오류');
+      if (!Array.isArray(obj.custom)) obj.custom = [];
       store = obj; save();
       document.getElementById('familyMembers').value = store.family || '';
       renderAll(); toast('복원했습니다');

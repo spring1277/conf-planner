@@ -496,6 +496,19 @@
       "url": "https://www.asco.org/breakthrough",
       "note": "아시아 개최 ASCO 프로그램.",
       "official": true
+    },
+    {
+      "id": "ascpalm-2026",
+      "name": "19th ASCPaLM Congress (Asian Society of Clinical Pathology and Laboratory Medicine) & APCTIBT 2026",
+      "abbr": "ASCPaLM 2026",
+      "field": "path",
+      "city": "Taipei", "country": "대만", "region": "아시아",
+      "start": "2026-10-02", "end": "2026-10-04", "year": 2026,
+      "abstractDeadline": "2026-04-30",
+      "earlyDeadline": "2026-08-05",
+      "url": "https://ascpalm2026.org/",
+      "note": "타이베이국제컨벤션센터(TICC). APCTIBT 2026 공동 개최. 주제 'Crossing the Border: Laboratory Medicine in the AI Era'. 초록 마감(종료), 조기등록 8/5·정규 8/6~9/18. 모든 시각 대만시간.",
+      "official": true
     }
   ]
 }

@@ -143,6 +143,29 @@ main { padding: 18px 14px 0; max-width: 920px; margin: 0 auto; }
   border: 1px dashed var(--urgent); font-size: 9.5px;
   padding: 1px 6px; border-radius: 5px; font-weight: 600;
 }
+.custom-badge {
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 9.5px; padding: 2px 7px; border-radius: 5px; font-weight: 700;
+}
+
+/* 학회 직접 추가 버튼 */
+.add-conf-btn {
+  width: 100%; margin-bottom: 14px; padding: 11px;
+  background: var(--surface); color: var(--accent);
+  border: 1px dashed var(--accent); border-radius: var(--radius);
+  font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+  transition: background .15s;
+}
+.add-conf-btn:hover { background: var(--accent-soft); }
+.btn-danger {
+  width: 100%; margin-top: 8px; padding: 10px 16px;
+  background: transparent; color: var(--urgent);
+  border: 1px solid var(--urgent); border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.btn-danger:hover { background: var(--urgent-soft); }
+.cf-row { display: flex; gap: 8px; }
+.cf-row > div { flex: 1; min-width: 0; }
 .card h3 { margin: 4px 0 2px; font-size: 15px; line-height: 1.32; font-weight: 650; letter-spacing: -.005em; }
 .card .abbr {
   font-family: var(--font-mono); font-size: 11px; color: var(--accent);
