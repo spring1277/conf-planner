@@ -446,6 +446,12 @@ function openConfModal(editId) {
     `<option value="${r}" ${c && c.region === r ? 'selected' : ''}>${r}</option>`).join('');
   document.getElementById('modalBody').innerHTML = `
     <h2>${c ? '학회 수정' : '학회 직접 추가'}</h2>
+    <label class="small">공식 URL</label>
+    <div class="cf-url-row">
+      <input class="field-input" id="cfUrl" value="${esc(c && c.url)}" placeholder="https://학회-공식사이트..." inputmode="url">
+      <button type="button" class="btn-fetch" id="cfFetch">정보 가져오기</button>
+    </div>
+    <p class="cf-fetch-status" id="cfFetchStatus">공식 링크를 붙여넣으면 아래 항목을 자동으로 채웁니다.</p>
     <label class="small">학회명 *</label>
     <input class="field-input" id="cfName" value="${esc(c && c.name)}" placeholder="예: Asian Society of Clinical Pathology and Laboratory Medicine">
     <label class="small">약칭</label>
@@ -466,8 +472,6 @@ function openConfModal(editId) {
       <div><label class="small">초록 마감</label><input type="date" class="field-input" id="cfAbs" value="${esc(c && c.abstractDeadline)}"></div>
       <div><label class="small">얼리버드 마감</label><input type="date" class="field-input" id="cfEarly" value="${esc(c && c.earlyDeadline)}"></div>
     </div>
-    <label class="small">공식 URL</label>
-    <input class="field-input" id="cfUrl" value="${esc(c && c.url)}" placeholder="https://...">
     <label class="small">메모</label>
     <textarea class="field-textarea" id="cfNote" placeholder="장소·세부 일정·비고">${esc(c && c.note)}</textarea>
     <button class="btn-primary" id="cfSave">${c ? '수정 저장' : '추가'}</button>
@@ -475,8 +479,162 @@ function openConfModal(editId) {
   `;
   document.getElementById('modal').classList.remove('hidden');
   document.getElementById('cfSave').addEventListener('click', () => saveConf(editId));
+  document.getElementById('cfFetch').addEventListener('click', fetchConferenceInfo);
+  document.getElementById('cfUrl').addEventListener('paste', () => setTimeout(() => {
+    if (!document.getElementById('cfName').value.trim()) fetchConferenceInfo();
+  }, 0));
   const del = document.getElementById('cfDelete');
   if (del) del.addEventListener('click', () => deleteConf(editId));
+}
+
+async function fetchConferenceInfo() {
+  const urlInput = document.getElementById('cfUrl');
+  const status = document.getElementById('cfFetchStatus');
+  const button = document.getElementById('cfFetch');
+  let url = urlInput.value.trim();
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  try { url = new URL(url).href; } catch (_) {
+    status.textContent = '올바른 웹 주소를 입력해 주세요.';
+    status.className = 'cf-fetch-status error';
+    return;
+  }
+  urlInput.value = url;
+  button.disabled = true;
+  button.textContent = '읽는 중…';
+  status.textContent = '공식 페이지에서 학회 정보를 확인하고 있습니다.';
+  status.className = 'cf-fetch-status loading';
+  try {
+    const page = await readConferencePage(url);
+    const info = parseConferencePage(page, url);
+    const filled = applyConferenceInfo(info);
+    if (!filled) throw new Error('recognition');
+    status.textContent = `${filled}개 항목을 채웠습니다. 날짜와 장소를 확인한 뒤 저장해 주세요.`;
+    status.className = 'cf-fetch-status success';
+  } catch (_) {
+    status.textContent = '이 사이트에서는 정보를 자동으로 읽지 못했습니다. URL은 유지되므로 나머지만 입력해 주세요.';
+    status.className = 'cf-fetch-status error';
+  } finally {
+    button.disabled = false;
+    button.textContent = '정보 가져오기';
+  }
+}
+
+async function readConferencePage(url) {
+  try {
+    const direct = await fetch(url, { mode: 'cors' });
+    if (direct.ok) return { text: await direct.text(), html: true };
+  } catch (_) {}
+  const readerUrl = 'https://api.microlink.io/?url=' + encodeURIComponent(url);
+  const res = await fetch(readerUrl, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error('fetch');
+  const payload = await res.json();
+  if (payload.status !== 'success' || !payload.data) throw new Error('metadata');
+  const d = payload.data;
+  return {
+    text: `Title: ${d.title || ''}\nDescription: ${d.description || ''}\n${d.publisher || ''}\n${d.url || url}`,
+    html: false
+  };
+}
+
+function parseConferencePage(page, url) {
+  let title = '', description = '', text = page.text;
+  if (page.html) {
+    const doc = new DOMParser().parseFromString(page.text, 'text/html');
+    title = doc.querySelector('meta[property="og:title"]')?.content || doc.title || '';
+    description = doc.querySelector('meta[property="og:description"],meta[name="description"]')?.content || '';
+    text = doc.body?.innerText || text;
+  } else {
+    title = (text.match(/^Title:\s*(.+)$/mi) || text.match(/^#\s+(.+)$/m) || [])[1] || '';
+    description = (text.match(/^Description:\s*(.+)$/mi) || [])[1] || '';
+  }
+  const compact = (title + '\n' + description + '\n' + text).replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ');
+  const dates = extractConferenceDates(compact);
+  const place = extractConferencePlace(compact);
+  const cleanTitle = cleanConferenceTitle(title || new URL(url).hostname.replace(/^www\./, ''));
+  return {
+    name: cleanTitle,
+    abbr: inferAbbr(cleanTitle, dates.start),
+    start: dates.start,
+    end: dates.end,
+    city: place.city,
+    country: place.country,
+    region: regionForCountry(place.country),
+    field: inferField(compact),
+    note: description.slice(0, 300)
+  };
+}
+
+function extractConferenceDates(text) {
+  const iso = [...text.matchAll(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/g)]
+    .map(m => `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`);
+  if (iso.length) return { start: iso[0], end: iso[1] || iso[0] };
+  const months = { january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12,
+    jan:1,feb:2,mar:3,apr:4,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12 };
+  const monthRange = text.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+(\d{1,2})(?:\s*[-–—]\s*(?:(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s*)?(\d{1,2}))?,?\s+(20\d{2})/i);
+  if (monthRange) {
+    const sm = months[monthRange[1].toLowerCase()], em = months[(monthRange[3] || monthRange[1]).toLowerCase()];
+    const start = `${monthRange[5]}-${String(sm).padStart(2,'0')}-${monthRange[2].padStart(2,'0')}`;
+    const end = `${monthRange[5]}-${String(em).padStart(2,'0')}-${(monthRange[4] || monthRange[2]).padStart(2,'0')}`;
+    return { start, end };
+  }
+  const dayFirst = text.match(/\b(\d{1,2})\s*[-–—]\s*(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})/i);
+  if (dayFirst) {
+    const m = months[dayFirst[3].toLowerCase()], prefix = `${dayFirst[4]}-${String(m).padStart(2,'0')}-`;
+    return { start: prefix + dayFirst[1].padStart(2,'0'), end: prefix + dayFirst[2].padStart(2,'0') };
+  }
+  return { start: '', end: '' };
+}
+
+const COUNTRY_HINTS = [
+  ['미국','USA|United States|U\\.S\\.A'],['캐나다','Canada'],['영국','United Kingdom|UK|England|Scotland|Wales'],
+  ['스페인','Spain'],['프랑스','France'],['독일','Germany'],['이탈리아','Italy'],['스웨덴','Sweden'],['덴마크','Denmark'],
+  ['네덜란드','Netherlands'],['포르투갈','Portugal'],['스위스','Switzerland'],['오스트리아','Austria'],
+  ['일본','Japan'],['대만','Taiwan'],['중국','China'],['홍콩','Hong Kong'],['싱가포르','Singapore'],['인도','India'],
+  ['말레이시아','Malaysia'],['필리핀','Philippines'],['태국','Thailand'],['한국','Korea|Seoul|Busan'],
+  ['호주','Australia'],['뉴질랜드','New Zealand'],['브라질','Brazil'],['멕시코','Mexico'],['아랍에미리트','United Arab Emirates|UAE|Dubai']
+];
+function extractConferencePlace(text) {
+  let country = '';
+  for (const [ko, pattern] of COUNTRY_HINTS) if (new RegExp(`\\b(?:${pattern})\\b`, 'i').test(text)) { country = ko; break; }
+  const locationLine = text.match(/(?:location|venue|place|held in|개최지|장소)\s*[:：-]?\s*([^\n|]{2,100})/i);
+  let city = '';
+  if (locationLine) city = locationLine[1].split(/,|\s[-–—]\s/)[0].replace(/[*#_[\]()]/g, '').trim();
+  return { city, country };
+}
+
+function cleanConferenceTitle(title) {
+  return title.replace(/^Title:\s*/i, '').replace(/\s*[|–—-]\s*(Home|Official Site|Welcome).*$/i, '').trim().slice(0, 180);
+}
+function inferAbbr(name, start) {
+  const known = name.match(/\b[A-Z][A-Z0-9]{2,9}\b/);
+  const year = (start || name).match(/20\d{2}/)?.[0] || '';
+  return known ? `${known[0]}${year && !name.includes(year) ? ' ' + year : ''}` : '';
+}
+function inferField(text) {
+  const s = text.toLowerCase();
+  const rules = [['thromb',/thrombo|hemosta|haemosta|hemophil/],['lab-heme',/laboratory hematology|haematology analyzer/],
+    ['heme',/hematol|haematol|myeloma|leukemia|lymphoma|transplant/],['molpath',/molecular path|human genetic|genomic/],
+    ['path',/pathology|clinical pathology/],['micro',/microbio|infectious|infection/],['poct',/point.of.care|poct|automation/],
+    ['chem',/clinical chem|laboratory medicine|diagnostic/],['cancer-res',/cancer research|immunology/],['onco',/oncology|cancer/]];
+  return (rules.find(([, re]) => re.test(s)) || [DATA.fields[0]?.key || 'chem'])[0];
+}
+function regionForCountry(country) {
+  if (['일본','대만','중국','홍콩','싱가포르','인도','말레이시아','필리핀','태국','한국'].includes(country)) return '아시아';
+  if (['미국','캐나다','멕시코'].includes(country)) return '북미';
+  if (['영국','스페인','프랑스','독일','이탈리아','스웨덴','덴마크','네덜란드','포르투갈','스위스','오스트리아'].includes(country)) return '유럽';
+  if (['호주','뉴질랜드'].includes(country)) return '오세아니아';
+  if (['브라질'].includes(country)) return '남미';
+  if (['아랍에미리트'].includes(country)) return '중동';
+  return '기타';
+}
+function applyConferenceInfo(info) {
+  const map = { cfName:'name', cfAbbr:'abbr', cfField:'field', cfCity:'city', cfCountry:'country', cfRegion:'region', cfStart:'start', cfEnd:'end', cfNote:'note' };
+  let count = 0;
+  Object.entries(map).forEach(([id, key]) => {
+    const el = document.getElementById(id), value = info[key];
+    if (el && value && !el.value.trim()) { el.value = value; count++; }
+  });
+  return count;
 }
 
 function saveConf(editId) {
