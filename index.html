@@ -8,7 +8,7 @@
   <title>해외학회 & 가족여행 플래너</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <script>try { var t = localStorage.getItem('confplanner.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
-  <link rel="stylesheet" href="styles.css?v=7" />
+  <link rel="stylesheet" href="styles.css?v=8" />
 </head>
 <body>
   <header class="topbar">
@@ -21,6 +21,7 @@
     </div>
     <div class="topbar-actions">
       <button id="btnTheme" class="ghost icon-btn" title="테마 전환" aria-label="라이트/다크 테마 전환">🌙</button>
+      <button id="btnSyncCloud" class="ghost icon-btn" title="기기 간 동기화" aria-label="기기 간 동기화">☁️</button>
       <button id="btnSync" class="ghost" title="학회 데이터 새로고침">↻ 데이터</button>
       <button id="btnExport" class="ghost" title="내 데이터 백업">⬇ 백업</button>
       <button id="btnImport" class="ghost" title="백업 불러오기">⬆ 복원</button>
@@ -90,6 +91,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

@@ -22,8 +22,10 @@ function load() {
 function allConfs() { return DATA.conferences.concat(store.custom || []); }
 function save() {
   store.savedAt = new Date().toISOString();
-  localStorage.setItem(LS_KEY, JSON.stringify(store));
+  persist();
+  scheduleSync();
 }
+function persist() { localStorage.setItem(LS_KEY, JSON.stringify(store)); }
 // 학회별 개인 데이터 접근 (없으면 생성)
 function cs(id) {
   if (!store.conf[id]) {
@@ -77,6 +79,13 @@ async function init() {
   initTheme();
   bindEvents();
   renderAll();
+  updateSyncBtn();
+  if (syncCfg().githubToken) syncNow(true); // 앱 열 때 최신본 받아오기
+}
+
+function updateSyncBtn() {
+  const btn = document.getElementById('btnSyncCloud');
+  if (btn) btn.title = syncCfg().githubToken ? '기기 간 동기화' : '기기 간 동기화 설정';
 }
 
 /* ---------- 테마(라이트/다크) ---------- */
@@ -154,6 +163,7 @@ function bindEvents() {
     store.family = e.target.value; save();
   });
   document.getElementById('btnTheme').addEventListener('click', toggleTheme);
+  document.getElementById('btnSyncCloud').addEventListener('click', () => openSyncModal());
   document.getElementById('btnAddConf').addEventListener('click', () => openConfModal());
   document.getElementById('btnSync').addEventListener('click', async () => {
     try {
@@ -236,18 +246,18 @@ function cardHTML(c) {
       <span class="spacer"></span>
       <span class="dday ${ddCls}">${dd}</span>
     </div>
-    <div class="abbr">${c.abbr}</div>
-    <h3>${c.name}</h3>
-    <div class="meta">📍 <strong>${c.city}</strong>, ${c.country} · ${c.region}</div>
+    <div class="abbr">${esc(c.abbr)}</div>
+    <h3>${esc(c.name)}</h3>
+    <div class="meta">📍 <strong>${esc(c.city)}</strong>, ${esc(c.country)} · ${esc(c.region)}</div>
     <div class="meta">🗓 <strong>${fmt(c.start)} – ${fmt(c.end)}</strong></div>
     ${abDl}${erDl}
-    ${c.note ? `<div class="note">${c.note}</div>` : ''}
+    ${c.note ? `<div class="note">${esc(c.note)}</div>` : ''}
     <div class="card-actions">
       <div class="stars" title="관심도">${stars}</div>
       <span class="spacer"></span>
       ${c.custom ? '<button class="mini edit-conf">수정</button>' : ''}
       <button class="mini attend ${s.attending ? 'on' : ''}">${s.attending ? '✔ 방문 예정' : '방문 예정'}</button>
-      ${c.url ? `<a class="mini link" href="${c.url}" target="_blank" rel="noopener">🔗</a>` : ''}
+      ${c.url ? `<a class="mini link" href="${esc(c.url)}" target="_blank" rel="noopener">🔗</a>` : ''}
     </div>
   </div>`;
 }
@@ -307,11 +317,11 @@ function planCardHTML(c) {
   return `
   <div class="card" data-id="${c.id}" style="border-left-color:${f.color}">
     <div class="badge-row">
-      <span class="abbr">${c.abbr}</span>
+      <span class="abbr">${esc(c.abbr)}</span>
       <span class="spacer"></span>
       <span class="dday ${daysUntil(c.start) < 0 ? 'past' : (daysUntil(c.start) <= 90 ? 'soon' : '')}">${ddayLabel(c.start)}</span>
     </div>
-    <div class="meta">📍 ${c.city}, ${c.country} · 🗓 ${fmt(c.start)}–${fmt(c.end)}</div>
+    <div class="meta">📍 ${esc(c.city)}, ${esc(c.country)} · 🗓 ${fmt(c.start)}–${fmt(c.end)}</div>
     <div class="progress"><span style="width:${pct}%"></span></div>
     <div class="meta">준비 ${doneN}/${items.length} (${pct}%)</div>
     <ul class="checklist">${lis}</ul>
@@ -369,7 +379,7 @@ function travelCardHTML(c) {
   return `
   <div class="card" data-id="${c.id}" style="border-left-color:${f.color}">
     <div class="badge-row">
-      <span class="abbr">${c.abbr}</span> — <span style="font-size:12px;color:var(--txt2)">${c.city}, ${c.country}</span>
+      <span class="abbr">${esc(c.abbr)}</span> — <span style="font-size:12px;color:var(--txt2)">${esc(c.city)}, ${esc(c.country)}</span>
       <span class="spacer"></span>
       <button class="mini travel-toggle ${on ? 'on' : ''}">${on ? '✔ 여행 계획' : '여행 붙이기'}</button>
     </div>
@@ -430,8 +440,8 @@ function renderTimeline() {
     <div class="tl-item ${e.type === 'deadline' ? 'deadline' : ''}">
       <div class="tl-date">${fmt(e.date)}<br><span style="font-size:11px">${ddayLabel(e.date)}</span></div>
       <div class="tl-body">
-        ${e.label}<span class="tl-tag ${e.type === 'deadline' ? 'tag-deadline' : 'tag-event'}">${e.type === 'deadline' ? '마감' : '학회'}</span>
-        ${e.sub ? `<div style="font-size:11px;color:var(--txt2)">${e.sub}</div>` : ''}
+        ${esc(e.label)}<span class="tl-tag ${e.type === 'deadline' ? 'tag-deadline' : 'tag-event'}">${e.type === 'deadline' ? '마감' : '학회'}</span>
+        ${e.sub ? `<div style="font-size:11px;color:var(--txt2)">${esc(e.sub)}</div>` : ''}
       </div>
     </div>`).join('');
 }
@@ -663,6 +673,125 @@ function deleteConf(id) {
   delete store.conf[id];
   save(); buildFilters(); renderAll(); closeModal();
   toast('학회를 삭제했습니다');
+}
+
+/* ================================================================
+   ☁️ 기기 간 동기화 — GitHub 비공개 Gist
+   개인 데이터(store: conf·family·custom)만 오간다. 학회 시드 데이터는 대상 아님.
+   전략: 전역 최신본 우선(LWW by savedAt) — 앱 열 때 받아오고, 편집하면 자동 업로드.
+   ================================================================ */
+const SYNC_KEY = 'confplanner.sync';
+const GIST_DESC = 'confplanner-sync';
+let syncTimer = null;
+
+function syncCfg() { try { return JSON.parse(localStorage.getItem(SYNC_KEY) || '{}'); } catch (e) { return {}; } }
+function saveSyncCfg(c) { localStorage.setItem(SYNC_KEY, JSON.stringify(c)); }
+function ghHeaders(tok) { return { 'Authorization': 'token ' + tok, 'Accept': 'application/vnd.github+json' }; }
+
+async function gistLocate(tok) {
+  const cfg = syncCfg();
+  if (cfg.gistId) return cfg.gistId;
+  const r = await fetch('https://api.github.com/gists?per_page=100', { headers: ghHeaders(tok) });
+  if (r.status === 401) throw new Error('GitHub 토큰이 유효하지 않습니다');
+  if (!r.ok) throw new Error('GitHub 연결 실패 (HTTP ' + r.status + ')');
+  const found = (await r.json()).find(g => g.description === GIST_DESC);
+  let id;
+  if (found) {
+    id = found.id;
+  } else {
+    const c = await fetch('https://api.github.com/gists', {
+      method: 'POST', headers: ghHeaders(tok),
+      body: JSON.stringify({ description: GIST_DESC, public: false, files: { 'data.json': { content: '{}' } } })
+    });
+    if (!c.ok) throw new Error('동기화 저장소 생성 실패 (토큰에 gist 권한이 있는지 확인)');
+    id = (await c.json()).id;
+  }
+  cfg.gistId = id; saveSyncCfg(cfg);
+  return id;
+}
+
+function syncSet(msg, cls) {
+  const el = document.getElementById('syncStatus');
+  if (el) { el.textContent = msg; el.className = 'sync-status ' + (cls || ''); }
+}
+
+function reflectStore() {
+  const fm = document.getElementById('familyMembers');
+  if (fm) fm.value = store.family || '';
+  buildFilters(); renderAll();
+}
+
+async function syncNow(silent) {
+  const cfg = syncCfg();
+  const tok = cfg.githubToken;
+  const btn = document.getElementById('btnSyncCloud');
+  if (!tok) { if (!silent) openSyncModal(); return; }
+  try {
+    syncSet('동기화 중…', 'loading');
+    if (btn) { btn.classList.add('spin'); }
+    const id = await gistLocate(tok);
+    const g = await fetch('https://api.github.com/gists/' + id, { headers: ghHeaders(tok), cache: 'no-store' });
+    if (!g.ok) throw new Error('다운로드 실패 (HTTP ' + g.status + ')');
+    let cloud = {};
+    try { const f = (await g.json()).files['data.json']; cloud = JSON.parse(f && f.content ? f.content : '{}'); } catch (e) { cloud = {}; }
+    // 전역 최신본 우선: 클라우드가 더 최근에 저장됐으면 이 기기에 반영
+    if (cloud && cloud.conf && (cloud.savedAt || '') > (store.savedAt || '')) {
+      store = cloud;
+      if (!store.conf) store.conf = {};
+      if (!Array.isArray(store.custom)) store.custom = [];
+      persist(); reflectStore();
+    }
+    // 현재(=더 최신) 데이터를 업로드해 다른 기기가 받아가게
+    const up = await fetch('https://api.github.com/gists/' + id, {
+      method: 'PATCH', headers: ghHeaders(tok),
+      body: JSON.stringify({ files: { 'data.json': { content: JSON.stringify(store) } } })
+    });
+    if (!up.ok) throw new Error('업로드 실패 (HTTP ' + up.status + ')');
+    const cfg2 = syncCfg(); cfg2.lastSync = Date.now(); saveSyncCfg(cfg2); // gistLocate가 저장한 gistId 보존
+    syncSet('✅ 동기화됨 ' + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), 'ok');
+    if (btn) { btn.classList.remove('spin'); btn.textContent = '☁️'; btn.title = '기기 간 동기화'; }
+  } catch (e) {
+    syncSet('❌ ' + e.message, 'fail');
+    if (btn) { btn.classList.remove('spin'); btn.textContent = '⚠️'; btn.title = '동기화 실패: ' + e.message; }
+    if (!silent) openSyncModal();
+    console.warn('sync failed:', e);
+  }
+}
+
+function scheduleSync() {
+  if (!syncCfg().githubToken) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => { syncTimer = null; syncNow(true); }, 4000);
+}
+
+function openSyncModal() {
+  const cfg = syncCfg();
+  const on = !!cfg.githubToken;
+  document.getElementById('modalBody').innerHTML = `
+    <h2>☁️ 기기 간 동기화</h2>
+    <p class="sync-help">GitHub <b>비공개 Gist</b>에 내가 입력한 데이터(관심도·방문 예정·체크리스트·가족여행·직접 추가한 학회)를 저장해 PC와 휴대폰이 같은 내용을 보게 합니다. 학회 일정 자체가 아니라 <b>내 개인 데이터만</b> 오갑니다.</p>
+    <label class="small">GitHub Personal Access Token</label>
+    <input class="field-input" id="syncTok" type="password" autocomplete="off" placeholder="${on ? '저장됨 · 바꿀 때만 입력' : 'ghp_...'}">
+    <p class="sync-help">github.com → Settings → Developer settings → Personal access tokens에서 <b>gist</b> 권한만 체크해 발급. 토큰은 이 기기에만 저장되고 GitHub에만 전송됩니다.${on && cfg.lastSync ? '<br>마지막 동기화: ' + new Date(cfg.lastSync).toLocaleString('ko-KR') : ''}</p>
+    <div id="syncStatus" class="sync-status"></div>
+    <button class="btn-primary" id="syncSave">${on ? '지금 동기화' : '저장하고 동기화'}</button>
+    ${on ? '<button class="btn-danger" id="syncOff">이 기기에서 동기화 끄기</button>' : ''}
+  `;
+  document.getElementById('modal').classList.remove('hidden');
+  document.getElementById('syncSave').addEventListener('click', () => {
+    const v = document.getElementById('syncTok').value.trim();
+    const c = syncCfg();
+    if (v) c.githubToken = v;
+    saveSyncCfg(c);
+    if (!c.githubToken) { syncSet('토큰을 입력해 주세요', 'fail'); return; }
+    syncNow(false);
+  });
+  const off = document.getElementById('syncOff');
+  if (off) off.addEventListener('click', () => {
+    const c = syncCfg(); delete c.githubToken; delete c.gistId; saveSyncCfg(c);
+    closeModal(); toast('이 기기에서 동기화를 껐습니다');
+    const btn = document.getElementById('btnSyncCloud'); if (btn) { btn.textContent = '☁️'; btn.title = '기기 간 동기화'; }
+  });
 }
 
 /* ---------- 백업/복원 ---------- */
