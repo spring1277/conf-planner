@@ -721,6 +721,73 @@ function reflectStore() {
   buildFilters(); renderAll();
 }
 
+/* ---- 3-way 필드 병합 (공통 조상 baseline 기준) ---- */
+const BASE_KEY = 'confplanner.base';
+function loadBaseline() { try { const b = JSON.parse(localStorage.getItem(BASE_KEY)); return b || null; } catch (e) { return null; } }
+function saveBaseline(s) { localStorage.setItem(BASE_KEY, JSON.stringify({ conf: s.conf || {}, family: s.family || '', custom: s.custom || [], savedAt: s.savedAt || '' })); }
+
+const TRAVEL_KEYS = ['enabled', 'from', 'to', 'members', 'todos', 'budget', 'notes'];
+function blankConf() { return { interest: 0, attending: false, checklist: {}, notes: '', budget: '', travel: { enabled: false, from: '', to: '', members: '', todos: '', budget: '', notes: '' } }; }
+function isBlankConf(m) {
+  if (!m) return true;
+  if ((m.interest || 0) !== 0 || m.attending || (m.notes || '') || (m.budget || '')) return false;
+  if (Object.keys(m.checklist || {}).length) return false;
+  const t = m.travel || {};
+  if (t.enabled) return false;
+  return !(t.from || t.to || t.members || t.todos || t.budget || t.notes);
+}
+
+// base=공통조상, a=로컬, c=클라우드. 한쪽만 바뀌면 그쪽 채택, 둘 다 바뀌면 preferA(최신 저장분).
+function pick3(base, a, c, preferA) {
+  const S = v => JSON.stringify(v === undefined ? null : v);
+  if (S(a) === S(c)) return a;
+  if (S(a) === S(base)) return c;   // 로컬 미변경 → 클라우드 채택
+  if (S(c) === S(base)) return a;   // 클라우드 미변경 → 로컬 채택
+  return preferA ? a : c;           // 둘 다 변경 → 최신 저장분
+}
+
+function mergeStores(base, local, cloud, preferLocal) {
+  base = base || { conf: {}, family: '', custom: [] };
+  const merged = { conf: {}, custom: [], savedAt: (preferLocal ? local.savedAt : cloud.savedAt) || local.savedAt || cloud.savedAt || '' };
+  merged.family = pick3(base.family || '', local.family || '', cloud.family || '', preferLocal);
+
+  // conf: 학회 id 합집합, 각 필드를 3-way
+  const ids = new Set([...Object.keys(base.conf || {}), ...Object.keys(local.conf || {}), ...Object.keys(cloud.conf || {})]);
+  for (const id of ids) {
+    const B = (base.conf || {})[id] || {}, L = (local.conf || {})[id] || blankConf(), C = (cloud.conf || {})[id] || blankConf();
+    const m = {};
+    m.interest = pick3(B.interest || 0, L.interest || 0, C.interest || 0, preferLocal);
+    m.attending = pick3(B.attending || false, L.attending || false, C.attending || false, preferLocal);
+    m.notes = pick3(B.notes || '', L.notes || '', C.notes || '', preferLocal);
+    m.budget = pick3(B.budget || '', L.budget || '', C.budget || '', preferLocal);
+    m.checklist = {};
+    const items = new Set([...Object.keys(B.checklist || {}), ...Object.keys(L.checklist || {}), ...Object.keys(C.checklist || {})]);
+    for (const it of items) {
+      const bv = (B.checklist || {}).hasOwnProperty(it) ? B.checklist[it] : undefined;
+      const lv = (L.checklist || {}).hasOwnProperty(it) ? L.checklist[it] : undefined;
+      const cv = (C.checklist || {}).hasOwnProperty(it) ? C.checklist[it] : undefined;
+      const r = pick3(bv, lv, cv, preferLocal);
+      if (r !== undefined) m.checklist[it] = r;   // 양쪽에서 삭제되면 drop
+    }
+    const bt = B.travel || {}, lt = L.travel || {}, ct = C.travel || {};
+    m.travel = {};
+    TRAVEL_KEYS.forEach(k => {
+      const def = k === 'enabled' ? false : '';
+      m.travel[k] = pick3(bt[k] === undefined ? def : bt[k], lt[k] === undefined ? def : lt[k], ct[k] === undefined ? def : ct[k], preferLocal);
+    });
+    if (!isBlankConf(m)) merged.conf[id] = m;   // 개인데이터 없는 stub은 저장 안 함
+  }
+
+  // custom: id 합집합, 레코드 단위 3-way(추가/삭제/수정 반영)
+  const byId = (arr, id) => (arr || []).find(x => x && x.id === id);
+  const custIds = new Set([...(base.custom || []), ...(local.custom || []), ...(cloud.custom || [])].filter(Boolean).map(x => x.id));
+  for (const id of custIds) {
+    const r = pick3(byId(base.custom, id) || null, byId(local.custom, id) || null, byId(cloud.custom, id) || null, preferLocal);
+    if (r) merged.custom.push(r);
+  }
+  return merged;
+}
+
 async function syncNow(silent) {
   const cfg = syncCfg();
   const tok = cfg.githubToken;
@@ -734,19 +801,22 @@ async function syncNow(silent) {
     if (!g.ok) throw new Error('다운로드 실패 (HTTP ' + g.status + ')');
     let cloud = {};
     try { const f = (await g.json()).files['data.json']; cloud = JSON.parse(f && f.content ? f.content : '{}'); } catch (e) { cloud = {}; }
-    // 전역 최신본 우선: 클라우드가 더 최근에 저장됐으면 이 기기에 반영
-    if (cloud && cloud.conf && (cloud.savedAt || '') > (store.savedAt || '')) {
-      store = cloud;
-      if (!store.conf) store.conf = {};
-      if (!Array.isArray(store.custom)) store.custom = [];
-      persist(); reflectStore();
-    }
-    // 현재(=더 최신) 데이터를 업로드해 다른 기기가 받아가게
+    if (!cloud || !cloud.conf) cloud = { conf: {}, family: '', custom: [] };
+    // 3-way 필드 병합: baseline(공통 조상) 기준으로 로컬·클라우드 변경을 각각 반영
+    const base = loadBaseline();
+    const preferLocal = (store.savedAt || '') >= (cloud.savedAt || '');
+    const merged = mergeStores(base, store, cloud, preferLocal);
+    store = merged;
+    if (!store.conf) store.conf = {};
+    if (!Array.isArray(store.custom)) store.custom = [];
+    persist(); reflectStore();
+    // 병합 결과를 업로드해 다른 기기가 받아가게
     const up = await fetch('https://api.github.com/gists/' + id, {
       method: 'PATCH', headers: ghHeaders(tok),
       body: JSON.stringify({ files: { 'data.json': { content: JSON.stringify(store) } } })
     });
     if (!up.ok) throw new Error('업로드 실패 (HTTP ' + up.status + ')');
+    saveBaseline(merged); // 업로드 성공 후에만 공통 조상 갱신(실패 시 다음 동기화가 재병합)
     const cfg2 = syncCfg(); cfg2.lastSync = Date.now(); saveSyncCfg(cfg2); // gistLocate가 저장한 gistId 보존
     syncSet('✅ 동기화됨 ' + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), 'ok');
     if (btn) { btn.classList.remove('spin'); btn.textContent = '☁️'; btn.title = '기기 간 동기화'; }
@@ -811,7 +881,9 @@ function importData(e) {
       const obj = JSON.parse(reader.result);
       if (!obj.conf) throw new Error('형식 오류');
       if (!Array.isArray(obj.custom)) obj.custom = [];
-      store = obj; save();
+      store = obj;
+      localStorage.removeItem(BASE_KEY); // 복원본은 새 로컬 변경으로 취급 → 다음 동기화에서 병합
+      save();
       document.getElementById('familyMembers').value = store.family || '';
       renderAll(); toast('복원했습니다');
     } catch (err) { toast('복원 실패: 올바른 백업 파일이 아닙니다'); }
