@@ -1,6 +1,6 @@
 // 해외학회 & 가족여행 플래너 서비스워커
 // 배포할 때마다 CACHE_VERSION 숫자만 올리면 이전 캐시가 자동 정리됩니다.
-const CACHE_VERSION = 'confplanner-v9';
+const CACHE_VERSION = 'confplanner-v10';
 const APP_SHELL = [
   './',
   './index.html',
